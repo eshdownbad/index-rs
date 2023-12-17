@@ -1,12 +1,16 @@
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::Response;
 use axum::{response::IntoResponse, Router};
+use std::env;
 use std::os::windows::fs::MetadataExt;
-use std::path::PathBuf;
-use std::{env, process};
+use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncRead, BufReader, BufStream};
+use tokio_util::io::ReaderStream;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -47,7 +51,13 @@ async fn fallback_handler(uri: Uri, State(s): State<AppState>) -> Result<Respons
         return Ok((StatusCode::NOT_FOUND, "not found!").into_response());
     }
     if path.is_file() {
-        return Ok("thisss is a fileee and download not implemented".into_response());
+        let filename = extract_file_name(&path);
+        let meta = fs::metadata(&path).await?;
+        if !is_file_hidden(filename, meta.file_attributes()) {
+            let file = File::open(&path).await?;
+            let stream = BufStream::new(file);
+            let body = Body::from_stream(stream);
+        }
     }
     if path.is_dir() {
         let mut reader = fs::read_dir(&path).await?;
@@ -71,7 +81,7 @@ async fn fallback_handler(uri: Uri, State(s): State<AppState>) -> Result<Respons
             entries
                 .iter()
                 .map(|n| {
-                    let mut p = uri.path().to_string() + n + "/";
+                    let p = uri.path().to_string() + n + "/";
 
                     format!("<a href='{p}'>{n}</a><br>")
                 })
@@ -87,12 +97,12 @@ struct AppState {
     base_path: PathBuf,
 }
 
-// fn extract_file_name(p: &Path) -> String {
-//     p.file_name()
-//         .and_then(|x| x.to_str())
-//         .map(|x| x.to_string())
-//         .unwrap_or(String::from("Unknown"))
-// }
+fn extract_file_name(p: &Path) -> String {
+    p.file_name()
+        .and_then(|x| x.to_str())
+        .map(|x| x.to_string())
+        .unwrap_or(String::from("Unknown"))
+}
 
 #[derive(thiserror::Error, Debug)]
 enum AppError {
@@ -104,3 +114,8 @@ impl IntoResponse for AppError {
         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
+
+fn is_file_hidden(file_name: String, attr: u32) -> bool {
+    attr & 0x2 != 0 || file_name.starts_with('.')
+}
+
