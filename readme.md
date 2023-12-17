@@ -1,6 +1,5 @@
-# Blaze-rs
+# index-rs
 
-note: i will rename this this is just a temporary name.
 
 this is a simple web server index for efficiently browsing directories.
 
